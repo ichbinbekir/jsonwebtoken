@@ -9,24 +9,36 @@ import (
 	"strings"
 )
 
-func Sign(payloadObject map[string]any, secret string) (string, error) {
+type Secret string
+
+type Algorithm string
+
+const (
+	HS256 Algorithm = "HS256"
+)
+
+type SignOptions struct {
+	Algorithm Algorithm
+}
+
+func Sign(payload map[string]any, secret string, options *SignOptions) (string, error) {
 	headerObject := map[string]any{"alg": "HS256"}
-	headerBuffer, err := json.Marshal(headerObject)
+	headerString, err := encode(headerObject)
 	if err != nil {
 		return "", err
 	}
-	headerBase64 := strings.Trim(base64.StdEncoding.EncodeToString(headerBuffer), "=")
 
-	payloadyBuffer, err := json.Marshal(payloadObject)
+	payloadString, err := encode(payload)
 	if err != nil {
 		return "", err
 	}
-	bodyBase64 := strings.Trim(base64.StdEncoding.EncodeToString(payloadyBuffer), "=")
 
-	up := headerBase64 + "." + bodyBase64
+	up := headerString + "." + payloadString
 
 	hash := hmac.New(sha256.New, []byte(secret))
-	hash.Write([]byte(up))
+	if _, err := hash.Write([]byte(up)); err != nil {
+		return "", err
+	}
 	hashBuffer := hash.Sum(nil)
 
 	plusToken := strings.Trim(up+"."+base64.StdEncoding.EncodeToString(hashBuffer), "=")
@@ -34,6 +46,15 @@ func Sign(payloadObject map[string]any, secret string) (string, error) {
 	token := strings.ReplaceAll(slahsToken, "/", "_")
 
 	return token, nil
+}
+
+func encode(object map[string]any) (string, error) {
+	buffer, err := json.Marshal(object)
+	if err != nil {
+		return "", err
+	}
+	base64 := strings.Trim(base64.StdEncoding.EncodeToString(buffer), "=")
+	return base64, nil
 }
 
 func Verify(token string, secret string) error {
