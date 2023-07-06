@@ -3,89 +3,121 @@ package jsonwebtoken
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash"
 	"strings"
 )
 
-type Secret string
+func Sign(payload any /* string | Buffer | object */, secretOrPrivateKey Secret, options SignOptions) (string, error) {
+	options.Header.Alg = options.Algorithm
 
-type Algorithm string
-
-const (
-	HS256 Algorithm = "HS256"
-)
-
-type SignOptions struct {
-	Algorithm Algorithm
-}
-
-func Sign(payload map[string]any, secret string, options *SignOptions) (string, error) {
-	headerObject := map[string]any{"alg": "HS256"}
-	headerString, err := encode(headerObject)
+	headerBase64, err := base64Encode(options.Header)
 	if err != nil {
 		return "", err
 	}
 
-	payloadString, err := encode(payload)
+	payloadBase64, err := base64Encode(payload)
 	if err != nil {
 		return "", err
 	}
 
-	up := headerString + "." + payloadString
+	up := headerBase64 + "." + payloadBase64
 
-	hash := hmac.New(sha256.New, []byte(secret))
-	if _, err := hash.Write([]byte(up)); err != nil {
-		return "", err
+	var hashBuffer []byte
+
+	switch options.Algorithm {
+	case HS256:
+		hashBuffer, err = hmacEncode(sha256.New, secretOrPrivateKey, up)
+	case HS384:
+		hashBuffer, err = hmacEncode(sha512.New384, secretOrPrivateKey, up)
+	case HS512:
+		hashBuffer, err = hmacEncode(sha512.New, secretOrPrivateKey, up)
 	}
-	hashBuffer := hash.Sum(nil)
 
-	plusToken := strings.Trim(up+"."+base64.StdEncoding.EncodeToString(hashBuffer), "=")
-	slahsToken := strings.ReplaceAll(plusToken, "+", "-")
-	token := strings.ReplaceAll(slahsToken, "/", "_")
-
-	return token, nil
-}
-
-func encode(object map[string]any) (string, error) {
-	buffer, err := json.Marshal(object)
 	if err != nil {
 		return "", err
 	}
-	base64 := strings.Trim(base64.StdEncoding.EncodeToString(buffer), "=")
-	return base64, nil
+
+	return up + "." + base64.RawURLEncoding.EncodeToString(hashBuffer), nil
 }
 
-func Verify(token string, secret string) error {
-	tokenParts := strings.Split(token, ".")
+func base64Encode(data any) (string, error) {
+	buffer, err := json.Marshal(data)
+	return base64.RawURLEncoding.EncodeToString(buffer), err
+}
 
-	up := tokenParts[0] + "." + tokenParts[1]
+func hmacEncode(h func() hash.Hash, secret any, token string) ([]byte, error) {
+	var qweqwe []byte
 
-	hash := hmac.New(sha256.New, []byte(secret))
-	hash.Write([]byte(up))
-	hashBuffer := hash.Sum(nil)
-
-	plusSignature := strings.Trim(base64.StdEncoding.EncodeToString(hashBuffer), "=")
-	slahsSignature := strings.ReplaceAll(plusSignature, "+", "-")
-	signature := strings.ReplaceAll(slahsSignature, "/", "_")
-
-	if tokenParts[2] == signature {
-		return nil
+	switch secret.(type) {
+	case string:
+		qweqwe = []byte(secret.(string))
+	case []byte:
+		qweqwe = secret.([]byte)
 	}
-	return errors.New("signature not valid")
+
+	asd := hmac.New(h, qweqwe)
+	if _, err := asd.Write([]byte(token)); err != nil {
+		return []byte(""), err
+	}
+
+	return asd.Sum(nil), nil
 }
 
-func Decode(token string) (map[string]any, error) {
-	tokenParts := strings.Split(token, ".")
+func Verify(token string, secretOrPublicKey Secret, options VerifyOptions) (any, error) {
+	parts := strings.Split(token, ".")
 
-	buffer, err := base64.StdEncoding.DecodeString(tokenParts[1])
+	up := parts[0] + "." + parts[1]
+
+	headerBuffer, err := base64.RawStdEncoding.DecodeString(parts[0])
 	if err != nil {
 		return nil, err
 	}
 
-	var payload map[string]any
-	json.Unmarshal(buffer, &payload)
+	var header JwtHeader
+	if json.Unmarshal(headerBuffer, &header) != nil {
+		return nil, err
+	}
+
+	var hashBuffer []byte
+
+	switch header.Alg {
+	case "HS256":
+		hashBuffer, err = hmacEncode(sha256.New, secretOrPublicKey, up)
+		fmt.Println(header)
+	case "HS384":
+		hashBuffer, err = hmacEncode(sha512.New384, secretOrPublicKey, up)
+	case "HS512":
+		hashBuffer, err = hmacEncode(sha512.New, secretOrPublicKey, up)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if parts[2] != base64.RawURLEncoding.EncodeToString(hashBuffer) {
+		return nil, errors.New("signature not valid")
+	}
+
+	return token, nil
+} //Jwt | JwtPayload | string
+
+func Decode(token string, options DecodeOptions) (any, error) {
+	parts := strings.Split(token, ".")
+
+	payloadBuffer, err := base64.RawStdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, err
+	}
+
+	var payload any
+	if json.Unmarshal(payloadBuffer, &payload) != nil {
+		return nil, err
+	}
 
 	return payload, nil
-}
+} //JwtPayload | string
